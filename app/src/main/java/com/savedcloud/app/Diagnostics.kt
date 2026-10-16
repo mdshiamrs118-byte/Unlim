@@ -60,6 +60,29 @@ object Diagnostics {
     }
 
     fun startedUncleanly(ctx: Context): Boolean = marker(ctx).exists()
+
+    /**
+     * Android lets an app read its own earlier log lines, including the native crash message of the
+     * previous process. Returns the interesting lines (signal, abort message, JNI errors, backtrace).
+     */
+    fun recentLog(): String {
+        return try {
+            val proc = ProcessBuilder("logcat", "-d", "-t", "1500", "-v", "threadtime")
+                .redirectErrorStream(true)
+                .start()
+            val lines = proc.inputStream.bufferedReader().readLines()
+            try { proc.destroy() } catch (_: Throwable) { }
+            val keep = Regex(
+                "tdjni|tdlib|JNI|CheckJNI|SIGSEGV|SIGABRT|SIGBUS|SIGILL|signal \\d|Fatal|FATAL|abort|" +
+                    "AndroidRuntime|DEBUG|linker|dlopen|UnsatisfiedLink|OutOfMemory|savedcloud|backtrace|#\\d\\d ",
+                RegexOption.IGNORE_CASE
+            )
+            val hits = lines.filter { keep.containsMatchIn(it) }.takeLast(70)
+            if (hits.isEmpty()) "(no matching system log lines found)" else hits.joinToString("\n") { it.take(240) }
+        } catch (t: Throwable) {
+            "(could not read system log: ${t.message})"
+        }
+    }
 }
 
 /** Starts TDLib safely and holds a problem description for the recovery screen. */
@@ -74,10 +97,18 @@ object Boot {
             return
         }
         if (Diagnostics.startedUncleanly(app)) {
-            problem = "The app closed while starting Telegram last time. If you simply closed it while it was " +
+            val base = "The app closed while starting Telegram last time. If you simply closed it while it was " +
                 "still loading, tap Retry. If it keeps happening, it is a crash: copy this report.\n\n" +
+                "Saved Cloud ${BuildConfig.VERSION_NAME}\n" +
                 "Last startup step reached: ${Diagnostics.lastStep(app)}\n\n" +
                 Diagnostics.deviceInfo()
+            problem = base + "\n\n(reading system log...)"
+            Thread({
+                val log = Diagnostics.recentLog()
+                if (problem != null && problem!!.startsWith(base)) {
+                    problem = base + "\n\nSystem log:\n" + log
+                }
+            }, "savedcloud-log").start()
             return
         }
         start(app)
@@ -90,7 +121,8 @@ object Boot {
     fun start(ctx: Context) {
         val app = ctx.applicationContext
         if (Config.credentials(app) != null) TdRepository.beginStarting()
-        Thread({
+        // 16 MB stack: loading the native library runs a very large initialiser.
+        Thread(null, {
             try {
                 Diagnostics.markStarting(app)
                 TdRepository.onStep = { Diagnostics.markStep(app, it) }
@@ -99,7 +131,7 @@ object Boot {
                 Diagnostics.markHealthy(app)
                 problem = Diagnostics.format(t)
             }
-        }, "savedcloud-boot").start()
+        }, "savedcloud-boot", 16L * 1024 * 1024).start()
     }
 
     fun retry(ctx: Context) {

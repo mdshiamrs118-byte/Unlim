@@ -17,8 +17,8 @@ android {
         applicationId = "com.savedcloud.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
 
         // The bundled TDLib native library is arm64 only (all modern phones).
         ndk { abiFilters += listOf("arm64-v8a") }
@@ -31,6 +31,9 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Not debuggable (no extra JNI checks, closer to the original app). Signed with the
+            // auto-generated debug key so it can be installed directly.
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
