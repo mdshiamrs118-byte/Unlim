@@ -194,7 +194,20 @@ fun Root(sharedUris: List<Uri>, onSharedHandled: () -> Unit) {
     when (val a = snap.auth) {
         is AuthUi.NeedCredentials -> SetupScreen()
 
-        is AuthUi.Starting -> Centered { CircularProgressIndicator() }
+        is AuthUi.Starting -> Centered {
+            Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Starting Telegram… the first start can take up to a minute on slower phones.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                if (snap.error != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(snap.error!!, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
 
         is AuthUi.WaitPhone -> FormScreen(
             title = "Log in with Telegram",

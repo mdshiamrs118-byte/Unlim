@@ -86,6 +86,13 @@ object TdRepository {
     }
     private val notifyPending = AtomicBoolean(false)
 
+    /** Optional progress reporter used to diagnose native crashes during startup. */
+    @Volatile var onStep: ((String) -> Unit)? = null
+
+    private fun step(text: String) {
+        try { onStep?.invoke(text) } catch (_: Throwable) { }
+    }
+
     @Volatile private var client: Client? = null
     @Volatile private var params: TdParams? = null
     @Volatile private var chatId: Long = 0L
@@ -133,13 +140,26 @@ object TdRepository {
         error = null
         loading = false
         File(p.rootDir).mkdirs()
-        Client.execute(TdApi.SetLogVerbosityLevel(1))
+        step("loading native library (libtdjni.so)")
+        System.loadLibrary("tdjni")
+        step("native library loaded, creating TDLib client")
         client = Client.create(
             Client.ResultHandler { onUpdate(it) },
             Client.ExceptionHandler { fail(it) },
             Client.ExceptionHandler { fail(it) }
         )
+        step("TDLib client created")
+        send(TdApi.SetLogVerbosityLevel(1))
+        step("log level sent, waiting for TDLib")
         changed()
+    }
+
+    /** Shows the "starting" state immediately (before the background start begins) so no setup screen flashes. */
+    fun beginStarting() {
+        if (client == null && auth is AuthUi.NeedCredentials) {
+            auth = AuthUi.Starting
+            changed()
+        }
     }
 
     /** Re-creates the client after logging out. */
@@ -329,6 +349,7 @@ object TdRepository {
     }
 
     private fun onAuth(s: TdApi.AuthorizationState) {
+        step("auth state: ${s.javaClass.simpleName}")
         when (s) {
             is TdApi.AuthorizationStateWaitTdlibParameters -> sendParameters(0)
 
@@ -386,6 +407,7 @@ object TdRepository {
                 p.language, p.deviceModel, p.systemVersion, p.appVersion
             )
         )
+        step("TDLib parameters sent")
     }
 
     private fun onReady() {

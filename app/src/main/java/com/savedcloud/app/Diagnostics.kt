@@ -3,6 +3,7 @@ package com.savedcloud.app
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.savedcloud.app.td.TdRepository
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -40,8 +41,19 @@ object Diagnostics {
 
     /** Written just before TDLib starts, removed once TDLib has answered. Survives native crashes. */
     fun markStarting(ctx: Context) {
-        try { marker(ctx).writeText("1") } catch (_: Throwable) { }
+        try { marker(ctx).writeText("starting") } catch (_: Throwable) { }
     }
+
+    /** Records how far startup got. Only writes while the start marker exists. */
+    fun markStep(ctx: Context, step: String) {
+        try {
+            val m = marker(ctx)
+            if (m.exists()) m.writeText(step)
+        } catch (_: Throwable) { }
+    }
+
+    fun lastStep(ctx: Context): String =
+        try { marker(ctx).takeIf { it.exists() }?.readText() ?: "unknown" } catch (_: Throwable) { "unknown" }
 
     fun markHealthy(ctx: Context) {
         try { marker(ctx).delete() } catch (_: Throwable) { }
@@ -62,22 +74,32 @@ object Boot {
             return
         }
         if (Diagnostics.startedUncleanly(app)) {
-            problem = "The app closed while starting Telegram last time (probably a native crash).\n\n" +
+            problem = "The app closed while starting Telegram last time. If you simply closed it while it was " +
+                "still loading, tap Retry. If it keeps happening, it is a crash: copy this report.\n\n" +
+                "Last startup step reached: ${Diagnostics.lastStep(app)}\n\n" +
                 Diagnostics.deviceInfo()
             return
         }
         start(app)
     }
 
+    /**
+     * Starts TDLib on a background thread: loading the native library initialises thousands of
+     * classes, which can take many seconds on slower phones and must not block the UI thread.
+     */
     fun start(ctx: Context) {
         val app = ctx.applicationContext
-        try {
-            Diagnostics.markStarting(app)
-            if (!Config.startIfPossible(app)) Diagnostics.markHealthy(app)
-        } catch (t: Throwable) {
-            Diagnostics.markHealthy(app)
-            problem = Diagnostics.format(t)
-        }
+        if (Config.credentials(app) != null) TdRepository.beginStarting()
+        Thread({
+            try {
+                Diagnostics.markStarting(app)
+                TdRepository.onStep = { Diagnostics.markStep(app, it) }
+                if (!Config.startIfPossible(app)) Diagnostics.markHealthy(app)
+            } catch (t: Throwable) {
+                Diagnostics.markHealthy(app)
+                problem = Diagnostics.format(t)
+            }
+        }, "savedcloud-boot").start()
     }
 
     fun retry(ctx: Context) {

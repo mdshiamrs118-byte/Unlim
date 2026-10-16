@@ -17,8 +17,8 @@ android {
         applicationId = "com.savedcloud.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
 
         // The bundled TDLib native library is arm64 only (all modern phones).
         ndk { abiFilters += listOf("arm64-v8a") }
@@ -43,6 +43,14 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+
+    // Extract libtdjni.so to disk at install time (same as the original Unlim app) instead of
+    // mapping it straight out of the APK, which crashes on some devices.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
     }
 }
 
